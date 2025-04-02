@@ -1,4 +1,5 @@
 from django.contrib.auth.models import AbstractBaseUser
+from django.contrib.auth.models import AbstractUser
 from django.conf import settings
 from django.db import models
 from utils.models import JSONField
@@ -103,20 +104,21 @@ class UserManager(models.Manager):
         extra_fields.setdefault('role', 'ADMIN')
         return self.create_user(nickname, password, **extra_fields)
 
-class User(AbstractBaseUser):
+
+class User(AbstractUser):
     id = models.AutoField(primary_key=True)
     nickname = models.CharField(max_length=100, unique=True)
     role = models.CharField(max_length=20, default="MEMBER")
-    space_id = models.IntegerField(null=True, blank=True)  # space_id 필드 추가
+    space_id = models.IntegerField(null=True, blank=True)
 
-    objects = UserManager()
-    
+    # password 필드 무시
+    password = None
+
     USERNAME_FIELD = 'nickname'
     REQUIRED_FIELDS = []
-    
+
     class Meta:
         db_table = "user"
-
 
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
