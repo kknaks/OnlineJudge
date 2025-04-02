@@ -14,4 +14,9 @@ urlpatterns = [
     url(r"^export_problem/?$", ExportProblemAPI.as_view(), name="export_problem_api"),
     url(r"^import_problem/?$", ImportProblemAPI.as_view(), name="import_problem_api"),
     url(r"^import_fps/?$", FPSProblemImport.as_view(), name="fps_problem_api"),
+
+    # 커스텀 url 패턴
+    url(r"^v1/coding-test/(?P<space_id>\d+)/test_case/?$", TestCaseAPI.as_view(), name="coding_test_case_api"),
+    url(r"^v1/coding-test/(?P<space_id>\d+)/problem-details/?$", ProblemAPI.as_view(), name="coding_test_problem_create"),
+
 ]

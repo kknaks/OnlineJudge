@@ -29,7 +29,11 @@ from ..serializers import (CreateContestProblemSerializer, CompileSPJSerializer,
                            ExportProblemRequestSerialzier, UploadProblemForm, ImportProblemSerializer,
                            FPSProblemSerializer)
 from ..utils import TEMPLATE_BASE, build_problem_template
-
+from utils.spaceMemberClient import SpaceMemberClient
+from account.models import User
+import json
+import logging
+        
 
 class TestCaseZipProcessor(object):
     def process_zip(self, uploaded_zip_file, spj, dir=""):
@@ -144,7 +148,10 @@ class TestCaseAPI(CSRFExemptAPIView, TestCaseZipProcessor):
         response["Content-Length"] = os.path.getsize(file_name)
         return response
 
-    def post(self, request):
+    def post(self, request, space_id=None):
+        print(f"TestCaseAPI.post 요청 받음: space_id={space_id}, user={request.user}")
+        logger = logging.getLogger(__name__)
+        logger.info(f"TestCaseAPI.post 요청 받음: space_id={space_id}, user={request.user}")
         form = TestCaseUploadForm(request.POST, request.FILES)
         if form.is_valid():
             spj = form.cleaned_data["spj"] == "true"
@@ -195,49 +202,232 @@ class ProblemBase(APIView):
             data["total_score"] = total_score
         data["languages"] = list(data["languages"])
 
+# class ProblemAPI(ProblemBase):
+#     # @problem_permission_required
+#     @validate_serializer(CreateProblemSerializer)
+#     def post(self, request):
+#         data = request.data
+#         _id = data["_id"]
+#         if not _id:
+#             return self.error("Display ID is required")
+#         if Problem.objects.filter(_id=_id, contest_id__isnull=True).exists():
+#             return self.error("Display ID already exists")
 
-class ProblemAPI(ProblemBase):
-    @problem_permission_required
+#         error_info = self.common_checks(request)
+#         if error_info:
+#             return self.error(error_info)
+
+#         # todo check filename and score info
+#         tags = data.pop("tags")
+#         data["created_by"] = request.user
+#         problem = Problem.objects.create(**data)
+
+#         for item in tags:
+#             try:
+#                 tag = ProblemTag.objects.get(name=item)
+#             except ProblemTag.DoesNotExist:
+#                 tag = ProblemTag.objects.create(name=item)
+#             problem.tags.add(tag)
+#         return self.success(ProblemAdminSerializer(problem).data)
+
+#     @problem_permission_required
+#     def get(self, request):
+#         problem_id = request.GET.get("id")
+#         rule_type = request.GET.get("rule_type")
+#         user = request.user
+#         if problem_id:
+#             try:
+#                 problem = Problem.objects.get(id=problem_id)
+#                 ensure_created_by(problem, request.user)
+#                 return self.success(ProblemAdminSerializer(problem).data)
+#             except Problem.DoesNotExist:
+#                 return self.error("Problem does not exist")
+
+#         problems = Problem.objects.filter(contest_id__isnull=True).order_by("-create_time")
+#         if rule_type:
+#             if rule_type not in ProblemRuleType.choices():
+#                 return self.error("Invalid rule_type")
+#             else:
+#                 problems = problems.filter(rule_type=rule_type)
+
+#         keyword = request.GET.get("keyword", "").strip()
+#         if keyword:
+#             problems = problems.filter(Q(title__icontains=keyword) | Q(_id__icontains=keyword))
+#         if not user.can_mgmt_all_problem():
+#             problems = problems.filter(created_by=user)
+#         return self.success(self.paginate_data(request, problems, ProblemAdminSerializer))
+
+#     @problem_permission_required
+#     @validate_serializer(EditProblemSerializer)
+#     def put(self, request):
+#         data = request.data
+#         problem_id = data.pop("id")
+
+#         try:
+#             problem = Problem.objects.get(id=problem_id)
+#             ensure_created_by(problem, request.user)
+#         except Problem.DoesNotExist:
+#             return self.error("Problem does not exist")
+
+#         _id = data["_id"]
+#         if not _id:
+#             return self.error("Display ID is required")
+#         if Problem.objects.exclude(id=problem_id).filter(_id=_id, contest_id__isnull=True).exists():
+#             return self.error("Display ID already exists")
+
+#         error_info = self.common_checks(request)
+#         if error_info:
+#             return self.error(error_info)
+#         # todo check filename and score info
+#         tags = data.pop("tags")
+#         data["languages"] = list(data["languages"])
+
+#         for k, v in data.items():
+#             setattr(problem, k, v)
+#         problem.save()
+
+#         problem.tags.remove(*problem.tags.all())
+#         for tag in tags:
+#             try:
+#                 tag = ProblemTag.objects.get(name=tag)
+#             except ProblemTag.DoesNotExist:
+#                 tag = ProblemTag.objects.create(name=tag)
+#             problem.tags.add(tag)
+
+#         return self.success()
+
+#     @problem_permission_required
+#     def delete(self, request):
+#         id = request.GET.get("id")
+#         if not id:
+#             return self.error("Invalid parameter, id is required")
+#         try:
+#             problem = Problem.objects.get(id=id, contest_id__isnull=True)
+#         except Problem.DoesNotExist:
+#             return self.error("Problem does not exists")
+#         ensure_created_by(problem, request.user)
+#         # d = os.path.join(settings.TEST_CASE_DIR, problem.test_case_id)
+#         # if os.path.isdir(d):
+#         #     shutil.rmtree(d, ignore_errors=True)
+#         problem.delete()
+#         return self.success()
+
+class ProblemAPI(CSRFExemptAPIView, ProblemBase):
     @validate_serializer(CreateProblemSerializer)
-    def post(self, request):
+    def post(self, request, space_id=None):
+        logger = logging.getLogger(__name__)
+
         data = request.data
         _id = data["_id"]
         if not _id:
             return self.error("Display ID is required")
-        if Problem.objects.filter(_id=_id, contest_id__isnull=True).exists():
-            return self.error("Display ID already exists")
+            
+        # space_id가 있으면 해당 space 내에서만 고유한 ID인지 확인
+        if space_id:
+            if Problem.objects.filter(_id=_id, space_id=space_id).exists():
+                return self.error("Display ID already exists in this space")
+        else:
+            # 기존 로직 - 공간이 없는 일반 문제
+            if Problem.objects.filter(_id=_id, contest_id__isnull=True, space_id__isnull=True).exists():
+                return self.error("Display ID already exists")
 
         error_info = self.common_checks(request)
         if error_info:
             return self.error(error_info)
+        
+        # API Gateway로부터 온 사용자 정보 확인
+        user_id = request.headers.get("X-User-ID")
+        username = request.headers.get("X-Username")
 
         # todo check filename and score info
         tags = data.pop("tags")
-        data["created_by"] = request.user
+        
+         # 사용자 처리 로직
+        if user_id and username:
+            logger.info(f"Request contains user info - ID: {user_id}, Username: {username}")
+            
+            # 이미 등록된 사용자인지 확인
+            user = User.objects.filter(id=user_id).first()
+            
+            if not user:
+                # 사용자가 등록되어 있지 않고 space_id가 있는 경우 스페이스 멤버 정보 조회
+                if space_id:
+                    logger.info(f"User not found in database, fetching from space service")
+                    space_member_client = SpaceMemberClient()
+                    member_info = space_member_client.get_space_member(space_id, user_id)
+                    
+                    if member_info:
+                        # 사용자 생성 (간단한 구현, 실제로는 더 많은 필드 필요할 수 있음)
+                        user = User.objects.create(
+                            id=user_id,
+                            username=username,
+                            email=f"{username}@example.com",  # 임시 이메일
+                            admin_type=User.REGULAR_USER  # 기본 권한
+                        )
+                        logger.info(f"Created new user from space member info: {username}")
+                    else:
+                        # 스페이스 멤버 정보도 없는 경우 현재 요청 사용자 사용
+                        logger.warning(f"Space member info not found, using request user")
+                        user = request.user
+                else:
+                    # space_id가 없는 경우 현재 요청 사용자 사용
+                    user = request.user
+            
+            data["created_by"] = user
+        else:
+            # API Gateway를 통해 오지 않은 요청인 경우 기본 로직 사용
+            data["created_by"] = request.user
+        
+        # space_id가 있으면 문제에 추가
+        if space_id:
+            data["space_id"] = space_id
+            
+        # 문제 생성
         problem = Problem.objects.create(**data)
 
+        # 태그 처리
         for item in tags:
             try:
                 tag = ProblemTag.objects.get(name=item)
             except ProblemTag.DoesNotExist:
                 tag = ProblemTag.objects.create(name=item)
             problem.tags.add(tag)
+            
         return self.success(ProblemAdminSerializer(problem).data)
 
-    @problem_permission_required
-    def get(self, request):
+    # @problem_permission_required - 데코레이터 제거
+    def get(self, request, space_id=None, problem_id=None):
+        # 특정 공간의 특정 문제를 조회하는 경우
+        if space_id and problem_id:
+            try:
+                problem = Problem.objects.get(id=problem_id, space_id=space_id)
+                return self.success(ProblemAdminSerializer(problem).data)
+            except Problem.DoesNotExist:
+                return self.error("Problem does not exist")
+        
+        # 특정 공간의 모든 문제를 조회하는 경우
+        if space_id:
+            problems = Problem.objects.filter(space_id=space_id).order_by("-create_time")
+            keyword = request.GET.get("keyword", "").strip()
+            if keyword:
+                problems = problems.filter(Q(title__icontains=keyword) | Q(_id__icontains=keyword))
+            return self.success(self.paginate_data(request, problems, ProblemAdminSerializer))
+            
+        # 기존 로직 - 일반 문제 조회
         problem_id = request.GET.get("id")
         rule_type = request.GET.get("rule_type")
         user = request.user
+        
         if problem_id:
             try:
                 problem = Problem.objects.get(id=problem_id)
-                ensure_created_by(problem, request.user)
+                # API 게이트웨이에서 처리하므로 제거
+                # ensure_created_by(problem, request.user)
                 return self.success(ProblemAdminSerializer(problem).data)
             except Problem.DoesNotExist:
                 return self.error("Problem does not exist")
 
-        problems = Problem.objects.filter(contest_id__isnull=True).order_by("-create_time")
+        problems = Problem.objects.filter(contest_id__isnull=True, space_id__isnull=True).order_by("-create_time")
         if rule_type:
             if rule_type not in ProblemRuleType.choices():
                 return self.error("Invalid rule_type")
@@ -251,61 +441,96 @@ class ProblemAPI(ProblemBase):
             problems = problems.filter(created_by=user)
         return self.success(self.paginate_data(request, problems, ProblemAdminSerializer))
 
-    @problem_permission_required
+    # @problem_permission_required - 데코레이터 제거
     @validate_serializer(EditProblemSerializer)
-    def put(self, request):
+    def put(self, request, space_id=None, problem_id=None):
         data = request.data
-        problem_id = data.pop("id")
+        
+        # 경로에서 problem_id가 제공된 경우
+        if problem_id:
+            problem_id_to_update = problem_id
+        else:
+            # 기존 방식으로 요청 바디에서 id 가져오기 
+            problem_id_to_update = data.get("id")
+            
+        if not problem_id_to_update:
+            return self.error("Problem ID is required")
 
         try:
-            problem = Problem.objects.get(id=problem_id)
-            ensure_created_by(problem, request.user)
+            # space_id가 있으면 해당 공간의 문제인지 확인
+            if space_id:
+                problem = Problem.objects.get(id=problem_id_to_update, space_id=space_id)
+            else:
+                problem = Problem.objects.get(id=problem_id_to_update)
+                # API 게이트웨이에서 처리하므로 제거
+                # ensure_created_by(problem, request.user)
         except Problem.DoesNotExist:
             return self.error("Problem does not exist")
 
-        _id = data["_id"]
+        _id = data.get("_id")
         if not _id:
             return self.error("Display ID is required")
-        if Problem.objects.exclude(id=problem_id).filter(_id=_id, contest_id__isnull=True).exists():
-            return self.error("Display ID already exists")
+            
+        # ID 중복 검사
+        if space_id:
+            # 공간 내에서 ID 중복 검사
+            if Problem.objects.exclude(id=problem_id_to_update).filter(_id=_id, space_id=space_id).exists():
+                return self.error("Display ID already exists in this space")
+        else:
+            # 기존 로직
+            if Problem.objects.exclude(id=problem_id_to_update).filter(_id=_id, contest_id__isnull=True, space_id__isnull=True).exists():
+                return self.error("Display ID already exists")
 
         error_info = self.common_checks(request)
         if error_info:
             return self.error(error_info)
+            
         # todo check filename and score info
-        tags = data.pop("tags")
-        data["languages"] = list(data["languages"])
-
+        tags = data.pop("tags", [])
+        
+        # data의 각 필드를 문제 객체에 설정
         for k, v in data.items():
-            setattr(problem, k, v)
+            if k != "id":  # id는 변경하지 않음
+                setattr(problem, k, v)
         problem.save()
 
-        problem.tags.remove(*problem.tags.all())
-        for tag in tags:
+        # 태그 업데이트
+        problem.tags.clear()
+        for tag_name in tags:
             try:
-                tag = ProblemTag.objects.get(name=tag)
+                tag = ProblemTag.objects.get(name=tag_name)
             except ProblemTag.DoesNotExist:
-                tag = ProblemTag.objects.create(name=tag)
+                tag = ProblemTag.objects.create(name=tag_name)
             problem.tags.add(tag)
 
         return self.success()
 
-    @problem_permission_required
-    def delete(self, request):
-        id = request.GET.get("id")
-        if not id:
+    # @problem_permission_required - 데코레이터 제거
+    def delete(self, request, space_id=None, problem_id=None):
+        # 경로에서 problem_id가 제공된 경우
+        if problem_id:
+            id_to_delete = problem_id
+        else:
+            # 기존 방식으로 쿼리 파라미터에서 id 가져오기
+            id_to_delete = request.GET.get("id")
+            
+        if not id_to_delete:
             return self.error("Invalid parameter, id is required")
+            
         try:
-            problem = Problem.objects.get(id=id, contest_id__isnull=True)
+            # space_id가 있으면 해당 공간의 문제인지 확인
+            if space_id:
+                problem = Problem.objects.get(id=id_to_delete, space_id=space_id)
+            else:
+                problem = Problem.objects.get(id=id_to_delete, contest_id__isnull=True, space_id__isnull=True)
+                # API 게이트웨이에서 처리하므로 제거
+                # ensure_created_by(problem, request.user)
         except Problem.DoesNotExist:
-            return self.error("Problem does not exists")
-        ensure_created_by(problem, request.user)
-        # d = os.path.join(settings.TEST_CASE_DIR, problem.test_case_id)
-        # if os.path.isdir(d):
-        #     shutil.rmtree(d, ignore_errors=True)
+            return self.error("Problem does not exist")
+            
+        # 문제 삭제
         problem.delete()
         return self.success()
-
 
 class ContestProblemAPI(ProblemBase):
     @validate_serializer(CreateContestProblemSerializer)
@@ -436,7 +661,6 @@ class ContestProblemAPI(ProblemBase):
         problem.delete()
         return self.success()
 
-
 class MakeContestProblemPublicAPIView(APIView):
     @validate_serializer(ContestProblemMakePublicSerializer)
     @problem_permission_required
@@ -467,7 +691,6 @@ class MakeContestProblemPublicAPIView(APIView):
         problem.tags.set(tags)
         return self.success()
 
-
 class AddContestProblemAPI(APIView):
     @validate_serializer(AddContestProblemSerializer)
     def post(self, request):
@@ -494,7 +717,6 @@ class AddContestProblemAPI(APIView):
         problem.save()
         problem.tags.set(tags)
         return self.success()
-
 
 class ExportProblemAPI(APIView):
     def choose_answers(self, user, problem):
@@ -544,7 +766,6 @@ class ExportProblemAPI(APIView):
         resp["Content-Type"] = "application/zip"
         resp["Content-Disposition"] = "attachment;filename=problem-export.zip"
         return resp
-
 
 class ImportProblemAPI(CSRFExemptAPIView, TestCaseZipProcessor):
     request_parsers = ()

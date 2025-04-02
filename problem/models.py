@@ -82,6 +82,9 @@ class Problem(models.Model):
     statistic_info = JSONField(default=dict)
     share_submission = models.BooleanField(default=False)
 
+    # custom fields
+    space_id = models.CharField(max_length=32, null=True, blank=True, db_index=True)
+
     class Meta:
         db_table = "problem"
         unique_together = (("_id", "contest"),)

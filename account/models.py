@@ -16,52 +16,104 @@ class ProblemPermission(object):
     ALL = "All"
 
 
+# class UserManager(models.Manager):
+#     use_in_migrations = True
+
+#     def get_by_natural_key(self, username):
+#         return self.get(**{f"{self.model.USERNAME_FIELD}__iexact": username})
+
+
+# class User(AbstractBaseUser):
+#     username = models.TextField(unique=True)
+#     email = models.TextField(null=True)
+#     create_time = models.DateTimeField(auto_now_add=True, null=True)
+#     # One of UserType
+#     admin_type = models.TextField(default=AdminType.REGULAR_USER)
+#     problem_permission = models.TextField(default=ProblemPermission.NONE)
+#     reset_password_token = models.TextField(null=True)
+#     reset_password_token_expire_time = models.DateTimeField(null=True)
+#     # SSO auth token
+#     auth_token = models.TextField(null=True)
+#     two_factor_auth = models.BooleanField(default=False)
+#     tfa_token = models.TextField(null=True)
+#     session_keys = JSONField(default=list)
+#     # open api key
+#     open_api = models.BooleanField(default=False)
+#     open_api_appkey = models.TextField(null=True)
+#     is_disabled = models.BooleanField(default=False)
+
+#     USERNAME_FIELD = "username"
+#     REQUIRED_FIELDS = []
+
+#     objects = UserManager()
+
+#     def is_admin(self):
+#         return self.admin_type == AdminType.ADMIN
+
+#     def is_super_admin(self):
+#         return self.admin_type == AdminType.SUPER_ADMIN
+
+#     def is_admin_role(self):
+#         return self.admin_type in [AdminType.ADMIN, AdminType.SUPER_ADMIN]
+
+#     def can_mgmt_all_problem(self):
+#         return self.problem_permission == ProblemPermission.ALL
+
+#     def is_contest_admin(self, contest):
+#         return self.is_authenticated and (contest.created_by == self or self.admin_type == AdminType.SUPER_ADMIN)
+
+#     class Meta:
+#         db_table = "user"
+
+# class UserManager(models.Manager):
+#     use_in_migrations = True
+
+#     def get_by_natural_key(self, username):
+#         return self.get(**{f"{self.model.USERNAME_FIELD}__iexact": username})
+    
+#     def create_user(self, nickname, password=None, **extra_fields):
+#         user = self.model(nickname=nickname, **extra_fields)
+#         if password:
+#             user.set_password(password)
+#         user.save(using=self._db)
+#         return user
+    
+#     def create_superuser(self, nickname, password=None, **extra_fields):
+#         extra_fields.setdefault('role', 'ADMIN')
+#         return self.create_user(nickname, password, **extra_fields)
+
 class UserManager(models.Manager):
     use_in_migrations = True
 
+    def get_queryset(self):
+        # password 필드를 항상 제외하고 쿼리 실행
+        return super().get_queryset().defer('password')
+
     def get_by_natural_key(self, username):
         return self.get(**{f"{self.model.USERNAME_FIELD}__iexact": username})
-
+    
+    def create_user(self, nickname, password=None, **extra_fields):
+        user = self.model(nickname=nickname, **extra_fields)
+        if password:
+            user.set_password(password)
+        user.save(using=self._db)
+        return user
+    
+    def create_superuser(self, nickname, password=None, **extra_fields):
+        extra_fields.setdefault('role', 'ADMIN')
+        return self.create_user(nickname, password, **extra_fields)
 
 class User(AbstractBaseUser):
-    username = models.TextField(unique=True)
-    email = models.TextField(null=True)
-    create_time = models.DateTimeField(auto_now_add=True, null=True)
-    # One of UserType
-    admin_type = models.TextField(default=AdminType.REGULAR_USER)
-    problem_permission = models.TextField(default=ProblemPermission.NONE)
-    reset_password_token = models.TextField(null=True)
-    reset_password_token_expire_time = models.DateTimeField(null=True)
-    # SSO auth token
-    auth_token = models.TextField(null=True)
-    two_factor_auth = models.BooleanField(default=False)
-    tfa_token = models.TextField(null=True)
-    session_keys = JSONField(default=list)
-    # open api key
-    open_api = models.BooleanField(default=False)
-    open_api_appkey = models.TextField(null=True)
-    is_disabled = models.BooleanField(default=False)
-
-    USERNAME_FIELD = "username"
-    REQUIRED_FIELDS = []
+    id = models.AutoField(primary_key=True)
+    nickname = models.CharField(max_length=100, unique=True)
+    role = models.CharField(max_length=20, default="MEMBER")
+    space_id = models.IntegerField(null=True, blank=True)  # space_id 필드 추가
 
     objects = UserManager()
-
-    def is_admin(self):
-        return self.admin_type == AdminType.ADMIN
-
-    def is_super_admin(self):
-        return self.admin_type == AdminType.SUPER_ADMIN
-
-    def is_admin_role(self):
-        return self.admin_type in [AdminType.ADMIN, AdminType.SUPER_ADMIN]
-
-    def can_mgmt_all_problem(self):
-        return self.problem_permission == ProblemPermission.ALL
-
-    def is_contest_admin(self, contest):
-        return self.is_authenticated and (contest.created_by == self or self.admin_type == AdminType.SUPER_ADMIN)
-
+    
+    USERNAME_FIELD = 'nickname'
+    REQUIRED_FIELDS = []
+    
     class Meta:
         db_table = "user"
 
